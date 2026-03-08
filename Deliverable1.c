@@ -116,6 +116,7 @@ int main(void){
         uint8_t pressed = (last_bt ^ current_bt) & current_bt;
         last_bt = current_bt;
 
+        // on button
         if (pressed & 0b0100) {
             on ^= 1;
             GPIO_PORTN_DATA_R ^= (1 << 1);
@@ -139,7 +140,7 @@ int main(void){
                 spin(steps, 0);
             }
 
-            // w reset
+            // W reset
             GPIO_PORTN_DATA_R &= ~(1 << 1);
             on = 0;
             stop = 0;
@@ -154,11 +155,13 @@ int main(void){
             continue;
         }
 
+        // direction button
         if (pressed & 0b1000) {
             dir ^= 1;
             GPIO_PORTN_DATA_R ^= 1;
         }
 
+        // angle button
         if (pressed & 0b0010) {
             if (fabs(angle) == 11.25) {
                 angle = 45.0;
@@ -173,6 +176,7 @@ int main(void){
             }
         }
 
+        // stop button
         if (pressed & 0b0001) {
             stop = 1;
             GPIO_PORTN_DATA_R = 0b00000000;
