@@ -5,8 +5,8 @@
 #include "PLL.h"
 
 void PortH_Init(void){
-	SYSCTL_RCGCGPIO_R |= SYSCTL_RCGCGPIO_R4;		          // Activate the clock for Port E
-	while((SYSCTL_PRGPIO_R & SYSCTL_PRGPIO_R4) == 0){};	      // Allow time for clock to stabilize
+	SYSCTL_RCGCGPIO_R |= SYSCTL_RCGCGPIO_R7;		          // Activate the clock for Port E
+	while((SYSCTL_PRGPIO_R & SYSCTL_RCGCGPIO_R7) == 0){};	      // Allow time for clock to stabilize
 
 	GPIO_PORTH_DIR_R = 0b00001111;							  // Enable PE0 and PE1 as outputs
 	GPIO_PORTH_AFSEL_R &= ~0x0F;
@@ -172,7 +172,7 @@ int main(void){
             if (fabs(angle) == 11.25) {
                 GPIO_PORTF_DATA_R |= 0b00010000;
             } else {
-                GPIO_PORTF_DATA_R ^= (1 << 4);
+                GPIO_PORTF_DATA_R &= ~(1 << 4);
             }
         }
 
@@ -193,16 +193,17 @@ int main(void){
             on = 0;
             GPIO_PORTN_DATA_R &= ~(1 << 1);
             cumdeg = 0.0;
+            degreestraveled = 0.0;
 
             continue;
         }
 
         if (dir) {
             // spin handles negative angle args
-            spin(512/(360/angle), 1);
+            spin(2048/(360/angle), 1);
             angle = -fabs(angle);
         } else {
-            spin(512/(360/angle), 0);
+            spin(2048/(360/angle), 0);
             angle = fabs(angle);
         }
         GPIO_PORTF_DATA_R ^= 0b0001;
