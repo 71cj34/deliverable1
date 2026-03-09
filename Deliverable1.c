@@ -1,12 +1,13 @@
 #include <stdint.h>
 #include <math.h>
+#include <stdlib.h>
 #include "tm4c1294ncpdt.h"
-#include "Systick.h"
+#include "SysTick.h"
 #include "PLL.h"
 
 void PortH_Init(void){
 	SYSCTL_RCGCGPIO_R |= SYSCTL_RCGCGPIO_R7;		          // Activate the clock for Port E
-	while((SYSCTL_PRGPIO_R & SYSCTL_RCGCGPIO_R7) == 0){};	      // Allow time for clock to stabilize
+	while((SYSCTL_PRGPIO_R & SYSCTL_PRGPIO_R7) == 0){};	      // Allow time for clock to stabilize
 
 	GPIO_PORTH_DIR_R = 0b00001111;							  // Enable PE0 and PE1 as outputs
 	GPIO_PORTH_AFSEL_R &= ~0x0F;
@@ -30,12 +31,17 @@ void PortM_Init(void){
 void PortJ_Init(void){
 	SYSCTL_RCGCGPIO_R |= SYSCTL_RCGCGPIO_R8;                 // Activate the clock for Port M
 	while((SYSCTL_PRGPIO_R & SYSCTL_PRGPIO_R8) == 0){};      // Allow time for clock to stabilize
+		
+				GPIO_PORTJ_LOCK_R = 0x4C4F434B;
+		GPIO_PORTJ_CR_R |= 0b011;
+		GPIO_PORTJ_LOCK_R = 0;
+
 
 	GPIO_PORTJ_DIR_R = 0b00000000;       					  // Enable PM0 and PM1 as inputs
     GPIO_PORTJ_DEN_R = 0b00000011;							  // Enable PM0 and PM1 as digital pins
 
 	// pull down resistors for active-high buttons
-	GPIO_PORTJ_PDR_R = 0b00000011;
+	GPIO_PORTJ_PUR_R = 0b00000011;
 	return;
 }
 
@@ -62,7 +68,7 @@ void PortF_Init(void){
 uint8_t readState(void){
     uint8_t buttons = 0;
     buttons |= (GPIO_PORTM_DATA_R & 0x03);           // PM0 (bit 0), PM1 (bit 1)
-    buttons |= ((GPIO_PORTJ_DATA_R & 0x03) << 2);    // PJ0 (bit 2), PJ1 (bit 3)
+    buttons |= (~(GPIO_PORTJ_DATA_R & 0x03) << 2);    // PJ0 (bit 2), PJ1 (bit 3)
     // j1 j0 m1 m0
     // b1 b0 b2 b3
     return buttons;
@@ -70,15 +76,15 @@ uint8_t readState(void){
 
 void spin(int steps, int dir){ // 2048 is one full rotation (?)
     // ENSURE SPIN IS ALWAYS CALLED WITH A MOD 4 STEPS (steps are not counted globally)
-	int delay = 50;
+	int delay = 500;
 	int seq[4] = {0b0011, 0b0110, 0b1100, 0b1001};
 	int seqCW[4] = {0b1001,0b1100,0b0110,0b0011};
 	steps = abs(steps);
 	for(int i=0; i< steps; i++){
 		if (dir == 0) {
-		    GPIO_PORTH_DATA_R = seq[i % 4]; // check direction?
+		    GPIO_PORTH_DATA_R = seqCW[i % 4]; // check direction?
 		} else {
-		    GPIO_PORTH_DATA_R = seqCW[i % 4];
+		    GPIO_PORTH_DATA_R = seq[i % 4];
 		}
 		SysTick_Wait10us(delay);
 	}
@@ -86,6 +92,7 @@ void spin(int steps, int dir){ // 2048 is one full rotation (?)
 
 int main(void){
     PLL_Init();
+	  SysTick_Init();
     PortH_Init();
     PortM_Init();
     PortF_Init();
@@ -108,36 +115,43 @@ int main(void){
     float degreestraveled=0;
     uint8_t last_bt = 0xFF;
     float cumdeg = 0;
+		
+		uint16_t pressed = 0;
 
-    while(1){
-        SysTick_Wait10ms(1); // we're putting this here because wacky shenanigans are happening with continue's
+while(1){
+        SysTick_Wait10us(50); 
+				pressed = 0;
+        
         uint8_t current_bt = readState();
-        // low -> high transition debounce
-        uint8_t pressed = (last_bt ^ current_bt) & current_bt;
+				// the 'good enough'
+        pressed = current_bt & (~last_bt);
         last_bt = current_bt;
 
-        // on button
+        // on button (this one saves all progress!)
         if (pressed & 0b0100) {
             on ^= 1;
             GPIO_PORTN_DATA_R ^= (1 << 1);
 
             if (on) {
-                // just in case shit got cleared from a STOP
+                // sets defaults in case a STOP clear
+								angle = 11.25;
+								dir = 1;
 
                 GPIO_PORTN_DATA_R |= 0b00000001;
                 GPIO_PORTF_DATA_R |= 0b00010000;
             }
         }
 
+				// shutdown sequence (happens only for 0x0001)
         if (stop) {
             // remainderf is negative when arg1 is closest to a higher arg2 multiple (for some reason)
             float degrees = -remainderf(degreestraveled, 360.0);
             int steps = (int)((degrees / 360.0) * 2048); // this is guaranteed to be an int % 4 since 11.25 % 360
             if (degrees > 0) {
                 // POSITIVE = CW!! Make sure this is consistent
-                spin(steps, 1);
-            } else {
                 spin(steps, 0);
+            } else {
+                spin(steps, 1);
             }
 
             // W reset
@@ -149,8 +163,8 @@ int main(void){
         }
 
         // stop all detection/movement if off
-        // only thing running is on button detection
-        // THIS IS NOT THE SAME THING AS STOP!!!!!!
+        // only thing running is on-button detection
+        // THIS IS NOT THE SAME THING AS STOP!!!!!! it just happens that stop sequence -> off loop
         if (!on) {
             continue;
         }
@@ -176,7 +190,7 @@ int main(void){
             }
         }
 
-        // stop button
+        // return to home button
         if (pressed & 0b0001) {
             stop = 1;
             GPIO_PORTN_DATA_R = 0b00000000;
@@ -187,7 +201,7 @@ int main(void){
         ////////// movement
 
         // for the case where angle = 45 but 360 - cumdeg < 45 (due to iterations with 11.25)
-        if ((360.0 - cumdeg) <= angle) {
+        if ((360.0 - cumdeg) <= fabs(angle)) {
             int steps = (int)(((360-cumdeg) / 360.0) * 2048);
             spin(steps, dir);
             on = 0;
@@ -195,6 +209,9 @@ int main(void){
             cumdeg = 0.0;
             degreestraveled = 0.0;
 
+						// idk if this is part of spec but its free + defaults get set if its turned back on so why not :/
+					  GPIO_PORTN_DATA_R = 0b00000000;
+            GPIO_PORTF_DATA_R = 0b00000000;
             continue;
         }
 
@@ -207,6 +224,8 @@ int main(void){
             angle = fabs(angle);
         }
         GPIO_PORTF_DATA_R ^= 0b0001;
+				SysTick_Wait10ms(1);
+				GPIO_PORTF_DATA_R ^= 0b0001;
 
         degreestraveled += angle;
         cumdeg += fabs(angle);
