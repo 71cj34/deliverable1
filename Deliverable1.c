@@ -10,6 +10,10 @@
 
 #include "PLL.h"
 
+// NOTES AFTER DEMO
+// return to home must turn around and go back
+// do not use cumulative degrees for the 360 degree timeouts
+
 void PortH_Init(void) {
     SYSCTL_RCGCGPIO_R |= SYSCTL_RCGCGPIO_R7; // Activate the clock for Port E
     while ((SYSCTL_PRGPIO_R & SYSCTL_PRGPIO_R7) == 0) {}; // Allow time for clock to stabilize
@@ -29,7 +33,7 @@ void PortM_Init(void) {
     GPIO_PORTM_DEN_R = 0b00000011; // Enable PM0 and PM1 as digital pins
 
     // pull down resistors for active-high buttons
-    GPIO_PORTM_PDR_R = 0b00000011;
+    GPIO_PORTM_PDR_R = 0b00000000;
     return;
 }
 
@@ -71,7 +75,7 @@ void PortF_Init(void) {
 
 uint8_t readState(void) {
     uint8_t buttons = 0;
-    buttons |= (GPIO_PORTM_DATA_R & 0x03); // PM0 (bit 0), PM1 (bit 1)
+    buttons |= (~GPIO_PORTM_DATA_R & 0x03); // PM0 (bit 0), PM1 (bit 1)
     buttons |= (~(GPIO_PORTJ_DATA_R & 0x03) << 2); // PJ0 (bit 2), PJ1 (bit 3)
     // j1 j0 m1 m0
     // b1 b0 b2 b3
@@ -121,10 +125,10 @@ int main(void) {
     GPIO_PORTN_DATA_R = 0b00000000;
 
     int dir = 1; // 1 = cw, status on
-    GPIO_PORTN_DATA_R |= 0b00000001;
+//    GPIO_PORTN_DATA_R |= 0b00000001; // should this be here?
     int on = 0;
     double angle = 11.25; // ieee 754 has an exact repr of this decimal so floating point inacc should be fine
-    GPIO_PORTF_DATA_R |= 0b00010000;
+//    GPIO_PORTF_DATA_R |= 0b00010000;
     int stop = 0;
     float degreestraveled = 0;
     uint8_t last_bt = 0xFF;
@@ -137,7 +141,7 @@ int main(void) {
         pressed = 0;
 
         uint8_t current_bt = readState();
-        // the 'good enough'
+        // gets rising edge
         pressed = current_bt & (~last_bt);
         last_bt = current_bt;
 
@@ -160,7 +164,7 @@ int main(void) {
         if (stop) {
             // remainderf is negative when arg1 is closest to a higher arg2 multiple (for some reason)
             float degrees = -remainderf(degreestraveled, 360.0);
-            int steps = (int)((degrees / 360.0) * 2048); // this is guaranteed to be an int % 4 since 11.25 % 360
+            int steps = (int)((degrees / 360.0) * 2048); // this is guaranteed to be an int % 4 since n11.25 % 360
             if (degrees > 0) {
                 // POSITIVE = CW!! Make sure this is consistent
                 spin(steps, 0);
@@ -168,7 +172,7 @@ int main(void) {
                 spin(steps, 1);
             }
 
-            // W reset
+            // reset
             GPIO_PORTN_DATA_R &= ~(1 << 1);
             on = 0;
             stop = 0;
@@ -222,8 +226,20 @@ int main(void) {
             GPIO_PORTN_DATA_R &= ~(1 << 1);
             cumdeg = 0.0;
             degreestraveled = 0.0;
+					
+					  // needs to flash one more time for the exact 11.25/45 degree cases
+						if (fabs(fabs(360-cumdeg) - 11.25) < 0.01) {
+							GPIO_PORTF_DATA_R ^= 0b0001;
+							SysTick_Wait10ms(1);
+							GPIO_PORTF_DATA_R ^= 0b0001;						
+						} else if (fabs(fabs(360-cumdeg) - 45.0) < 0.01) {							
+							GPIO_PORTF_DATA_R ^= 0b0001;
+							SysTick_Wait10ms(1);
+							GPIO_PORTF_DATA_R ^= 0b0001;	
+						}
 
-            // idk if this is part of spec but its free + defaults get set if its turned back on so why not :/
+
+            // not sure if this is part of spec but its free + defaults get set if its turned back on so why not :/
             GPIO_PORTN_DATA_R = 0b00000000;
             GPIO_PORTF_DATA_R = 0b00000000;
             continue;
